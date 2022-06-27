@@ -11,10 +11,11 @@ if TYPE_CHECKING:
 
 
 class Messagable:
-    id: int
+    if TYPE_CHECKING:
+        id: int
 
-    _loop: AbstractEventLoop
-    _client: Client
+        _loop: AbstractEventLoop
+        _client: Client
 
     async def send(self, *args, **kwargs):
         return await self._client.send_message(*args, **kwargs)
