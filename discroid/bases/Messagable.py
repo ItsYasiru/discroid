@@ -5,12 +5,9 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop, Task
-    from types import TracebackType
-    from typing import Generator, Optional, Type, TypeVar
+    from typing import Generator
 
     from ..Client import Client
-
-    BE = TypeVar("BE", bound=BaseException)
 
 
 class Messagable:
@@ -28,10 +25,10 @@ class Messagable:
 
 class Typing:
     def __init__(self, messagable: Messagable):
-        self.task: Task = None
         self.interval: int = 5
         self.messagable: Messagable = messagable
 
+        self.__task: Task = None
         self.__loop: AbstractEventLoop = messagable._loop
         self.__client: Client = messagable._client
 
@@ -50,13 +47,8 @@ class Typing:
                 await self.__client.trigger_typing(self.messagable.id)
                 await asyncio.sleep(self.interval)
 
-        self.task = self.__loop.create_task(worker())
-        self.task.add_done_callback(handle_future)
+        self.__task = self.__loop.create_task(worker())
+        self.__task.add_done_callback(handle_future)
 
-    async def __aexit__(
-        self,
-        exc_type: Optional[Type[BE]],
-        exc: Optional[BE],
-        traceback: Optional[TracebackType],
-    ) -> None:
-        self.task.cancel()
+    async def __aexit__(self, *args, **kwargs) -> None:
+        self.__task.cancel()
