@@ -16,13 +16,18 @@ if TYPE_CHECKING:
 
 class Client:
     def __init__(self):
-        self.setup_hook: Optional[Awaitable] = None
-
         self.__wss: Websocket = None
         self.__http: RequestHandler = None
         self.__loop: AbstractEventLoop = None
+        self.__setup_hook: Optional[Awaitable] = None
 
         self.user: User = None  # will be set after login
+
+    def setup_hook(self):
+        def decorator(func):
+            self.__setup_hook = func
+
+        return decorator
 
     async def login(self, token: str) -> None:
         data = await self.__http.login(token.strip())
@@ -42,7 +47,7 @@ class Client:
                 # self.__wss = await self.__wss.connect(reconnect=reconnect)
                 self.user = await self.__http.login(token=token)
 
-                await self.setup_hook()
+                await self.__setup_hook()
             except Exception as e:
                 raise e
             finally:
