@@ -15,10 +15,11 @@ if TYPE_CHECKING:
 
 
 class Client:
-    def __init__(self):
+    def __init__(self, *, proxy: str = None):
         self.__wss: Websocket = None
         self.__http: RequestHandler = None
         self.__loop: AbstractEventLoop = None
+        self.__proxy: str = proxy
         self.__setup_hook: Optional[Awaitable] = None
 
         self.user: User = None  # will be set after login
@@ -40,7 +41,7 @@ class Client:
         return await self.__http.trigger_typing(channel_id)
 
     def run(self, token: str, *, reconnect: bool = True) -> None:
-        self.__http = RequestHandler()
+        self.__http = RequestHandler(proxy=self.__proxy)
 
         async def runner():
             try:

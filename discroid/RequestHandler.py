@@ -27,12 +27,13 @@ async def json_or_text(response: aiohttp.ClientResponse) -> Union[dict, str]:
 
 
 class RequestHandler:
-    def __init__(self, *, retries: int = 3):
+    def __init__(self, *, retries: int = 3, proxy: str = None):
         self.retries: int = retries
 
         self.api_version: int = 9
         self.base_route: str = f"https://discord.com/api/v{self.api_version}/"
 
+        self.__proxy: str = proxy
         self.__headers: dict = None
         self.__session: aiohttp.ClientSession = aiohttp.ClientSession()
 
@@ -83,10 +84,11 @@ class RequestHandler:
         *,
         bind: Any = lambda x: x,
     ) -> Any:
-        kwargs = dict()
-        kwargs["headers"] = self.__headers
-        if json:
-            kwargs["json"] = json
+        kwargs = {
+            "json": json if json else None,
+            "proxy": self.__proxy,
+            "headers": self.__headers,
+        }
 
         for tries in range(self.retries):
             try:
