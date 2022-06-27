@@ -13,6 +13,7 @@ from .Utils import Utils
 
 if TYPE_CHECKING:
     from typing import Any, Union
+    from aiohttp import ClientWebSocketResponse
 
 
 async def json_or_text(response: aiohttp.ClientResponse) -> Union[dict, str]:
@@ -27,11 +28,17 @@ async def json_or_text(response: aiohttp.ClientResponse) -> Union[dict, str]:
 
 
 class RequestHandler:
-    def __init__(self, *, retries: int = 3, proxy: str = None):
+    def __init__(
+        self,
+        *,
+        api_version: int,
+        retries: int = 3,
+        proxy: str = None,
+    ):
         self.retries: int = retries
 
-        self.api_version: int = 9
-        self.base_route: str = f"https://discord.com/api/v{self.api_version}/"
+        self.api_version: int = api_version
+        self.base_route: str = f"https://discord.com/api/v{api_version}/"
 
         self.__proxy: str = proxy
         self.__headers: dict = None
@@ -85,7 +92,7 @@ class RequestHandler:
         bind: Any = lambda x: x,
     ) -> Any:
         kwargs = {
-            "json": json if json else None,
+            "json": json or None,
             "proxy": self.__proxy,
             "headers": self.__headers,
         }
@@ -119,26 +126,43 @@ class RequestHandler:
         await self.set_headers(token=token, locale=locale, user_agent=user_agent)
         return await self.request("GET", "/users/@me", bind=ClientUser)
 
+    async def connect_to_websocket(
+        self,
+        route: str,
+        *,
+        compress: int = 0,
+    ) -> ClientWebSocketResponse:
+        kwargs = {
+            "proxy": self.__proxy,
+            "max_msg_size": 0,
+            "timeout": 30.0,
+            "autoclose": False,
+            "headers": self.__headers,
+            "compress": compress,
+        }
+
+        return await self.__session.ws_connect(route, **kwargs)
+
     async def send_message(
         self,
         channel_id: int,
         content: str,
         *,
         tts: bool = False,
-        embed: dict = None,
         nonce=None,
         allowed_mentions=None,
         message_reference=None,
         sticker_ids=None,
     ) -> Message:
-        json = {"content": content, "tts": tts}
+        json = {
+            "tts": tts,
+            "content": content,
+        }
         if nonce == "calculate":
             nonce = Utils.calculate_nonce()
         else:
             nonce = str(nonce)
             json["nonce"] = nonce
-        if embed is not None:
-            json["embed"] = embed
         if message_reference is not None:
             json["message_reference"] = message_reference
         if allowed_mentions is not None:
