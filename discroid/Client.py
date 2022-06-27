@@ -15,7 +15,14 @@ if TYPE_CHECKING:
 
 
 class Client:
-    def __init__(self, *, proxy: str = None):
+    def __init__(
+        self,
+        *,
+        proxy: str = None,
+        api_version: int = 9,
+    ):
+        self.api_version: int = api_version
+
         self.__wss: Websocket = None
         self.__http: RequestHandler = None
         self.__loop: AbstractEventLoop = None
@@ -23,6 +30,16 @@ class Client:
         self.__setup_hook: Optional[Awaitable] = None
 
         self.user: User = None  # will be set after login
+
+    async def __aenter__(self) -> None:
+        await self.__setup_hook()
+
+    async def __aexit__(self, *args, **kwargs) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        await self.__wss.close()
+        await self.__http.close()
 
     def setup_hook(self):
         def decorator(func):
@@ -41,19 +58,13 @@ class Client:
         return await self.__http.trigger_typing(channel_id)
 
     def run(self, token: str, *, reconnect: bool = True) -> None:
-        self.__http = RequestHandler(proxy=self.__proxy)
+        self.__wss = Websocket(api_version=self.api_version)
+        self.__http = RequestHandler(proxy=self.__proxy, api_version=self.api_version)
 
         async def runner():
-            try:
-                # self.__wss = await self.__wss.connect(reconnect=reconnect)
+            async with self:
                 self.user = await self.__http.login(token=token)
-
-                await self.__setup_hook()
-            except Exception as e:
-                raise e
-            finally:
-                # await self.__wss.close()
-                await self.__http.close()
+                self.__wss = await self.__wss.connect(reconnect=reconnect)
 
         try:
             self.__loop = asyncio.get_event_loop()
