@@ -3,25 +3,29 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+import ua_parser.user_agent_parser
+
 from .RequestHandler import RequestHandler
 from .User import User
 from .Websocket import Websocket
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
-    from typing import Awaitable, Optional
+    from typing import Any, Awaitable, Callable, Optional
 
     from .Message import Message
 
 
 class Client:
-    def __init__(
-        self,
-        *,
-        proxy: str = None,
-        api_version: int = 9,
-    ):
-        self.api_version: int = api_version
+    def __init__(self, *, proxy: str = None, locale: str = None, user_agent: str = None, api_version: int = None, build_number: int = None):
+        self.locale: str = locale or "en-US"
+        self.user_agent: str = (
+            user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36"
+        )
+        self.build_number: int = build_number or 117300
+        self.super_properties = self.get_super_properties()
+
+        self.api_version: int = api_version or 9
 
         self.__wss: Websocket = None
         self.__http: RequestHandler = None
@@ -41,11 +45,29 @@ class Client:
         await self.__wss.close()
         await self.__http.close()
 
-    def setup_hook(self):
+    def setup(self):
         def decorator(func):
             self.__setup_hook = func
 
         return decorator
+
+    def event(self):
+        def decorator(func):
+            pass  # set up listner
+
+        return decorator
+
+    def wait_for(
+        self,
+        event: str,
+        /,
+        *,
+        check: Callable[[dict[str, Any]], bool] = lambda *args, **kwargs: True,
+        timeout: float = None,
+    ) -> Any:
+        future = self.__loop.create_future()
+        self.__wss.register_listner(event=event, check=check, future=future)
+        return asyncio.wait_for(future, timeout)
 
     async def login(self, token: str) -> None:
         data = await self.__http.login(token.strip())
@@ -63,8 +85,8 @@ class Client:
 
         async def runner():
             async with self:
-                self.user = await self.__http.login(token=token)
-                self.__wss = await self.__wss.connect(reconnect=reconnect)
+                self.user = await self.__http.login(token, locale=self.locale, user_agent=self.user_agent)
+                self.__wss = await self.__wss.connect(self, token=token, reconnect=reconnect)
 
         try:
             self.__loop = asyncio.get_event_loop()
@@ -73,3 +95,26 @@ class Client:
             return
         except Exception as e:
             raise e
+
+    def get_super_properties(self):
+        parsed_ua = ua_parser.user_agent_parser.Parse(self.user_agent)
+        browser_versions = [parsed_ua["user_agent"]["major"], parsed_ua["user_agent"]["minor"], parsed_ua["user_agent"]["patch"]]
+        os_versions = [parsed_ua["os"]["major"], parsed_ua["os"]["minor"], parsed_ua["os"]["patch"]]
+
+        sp = {
+            "os": parsed_ua["os"]["family"],
+            "browser": parsed_ua["user_agent"]["family"],
+            "device": "",
+            "system_locale": self.locale,
+            "browser_user_agent": parsed_ua["string"],
+            "browser_version": ".".join(filter(None, browser_versions)),
+            "os_version": ".".join(filter(None, os_versions)),
+            "referrer": "",
+            "referring_domain": "",
+            "referrer_current": "",
+            "referring_domain_current": "",
+            "release_channel": "stable",
+            "client_build_number": self.build_number,
+            "client_event_source": None,
+        }
+        return sp

@@ -48,15 +48,10 @@ class RequestHandler:
         self,
         *,
         token: str,
-        locale: str = None,
-        user_agent: str = None,
+        locale: str,
+        user_agent: str,
         custom_headers: dict = None,
     ) -> None:
-        if locale is None:
-            locale = "en-US"
-        if user_agent is None:
-            user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36"
-
         parsed_ua = ua_parser.user_agent_parser.Parse(user_agent)
         self.__headers = {
             "Accept": "*/*",
@@ -67,9 +62,7 @@ class RequestHandler:
             "Content-Type": "application/json",
             "Pragma": "no-cache",
             "Referer": "https://discord.com/channels/@me",
-            "Sec-Ch-Ua": '" Not A;Brand";v="99", "Chromium";v="{0}", "Google Chrome";v="{0}"'.format(
-                parsed_ua["user_agent"]["major"]
-            ),
+            "Sec-Ch-Ua": '" Not A;Brand";v="99", "Chromium";v="{0}", "Google Chrome";v="{0}"'.format(parsed_ua["user_agent"]["major"]),
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": '"{}"'.format(parsed_ua["os"]["family"]),
             "Sec-Fetch-Dest": "empty",
@@ -99,9 +92,7 @@ class RequestHandler:
 
         for tries in range(self.retries):
             try:
-                async with self.__session.request(
-                    method, self.base_route + route, **kwargs
-                ) as response:
+                async with self.__session.request(method, self.base_route + route, **kwargs) as response:
                     data = await json_or_text(response)
 
                     if 300 > response.status >= 200:
