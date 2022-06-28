@@ -10,7 +10,7 @@ import aiohttp
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop, Future, Task
-    from typing import Any, Callable, Optional
+    from typing import Any, Awaitable, Callable, Optional
 
     from aiohttp import ClientWebSocketResponse
 
@@ -86,7 +86,8 @@ class Websocket:
         self.__loop: AbstractEventLoop = None
         self.__websocket: ClientWebSocketResponse = None
         self.__dispatch: Callable = lambda *args: None
-        self.__dispatch_listeners: list[EventListener] = []
+        self.__dispatch_handlers: dict[str, list[Awaitable]] = dict()
+        self.__dispatch_listeners: list[EventListener] = list()
 
     @staticmethod
     def get_websocket(
@@ -106,11 +107,9 @@ class Websocket:
     def decompress(self, payload) -> dict:
         payload = self.__zlib.decompress(payload)
         _json = json.loads(payload.decode("UTF8"))
-        print(f"wss <- {_json}")
         return _json
 
     async def send(self, payload: dict) -> None:
-        print(f"wss -> {payload}")
         await self.__websocket.send_json(payload)
 
     async def receive(self) -> dict:
@@ -128,6 +127,11 @@ class Websocket:
         entry = EventListener(event=event, check=check, result=result, future=future)
         self.__dispatch_listeners.append(entry)
         return future
+
+    def register_handler(self, event: str, *, func: Awaitable) -> None:
+        handlers = self.__dispatch_handlers.get(event, list())
+        handlers.append(func)
+        self.__dispatch_handlers[event] = handlers
 
     async def hello(self):
         payload = await self.receive()
@@ -166,8 +170,6 @@ class Websocket:
             while True:
                 payload = await self.receive()
 
-                op = payload.get("op")
-                seq = payload.get("s")
                 data = payload.get("d")
                 event = payload.get("t")
 
@@ -194,6 +196,12 @@ class Websocket:
 
                 for index in reversed(removed):
                     del self.__dispatch_listeners[index]
+
+                handlers = self.__dispatch_handlers.get(event)
+                if handlers:
+                    for handler in handlers:
+                        self.__loop.create_task(handler(data))
+
         except Exception as e:
             raise e
 

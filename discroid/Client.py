@@ -17,7 +17,8 @@ if TYPE_CHECKING:
 
 
 class Client:
-    def __init__(self, *, proxy: str = None, locale: str = None, user_agent: str = None, api_version: int = None, build_number: int = None):
+    def __init__(self, *, proxy: str = None, locale: str = None, user_agent: str = None, api_version: int = 9, build_number: int = None):
+
         self.locale: str = locale or "en-US"
         self.user_agent: str = (
             user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36"
@@ -25,18 +26,15 @@ class Client:
         self.build_number: int = build_number or 117300
         self.super_properties = self.get_super_properties()
 
-        self.api_version: int = api_version or 9
-
-        self.__wss: Websocket = None
-        self.__http: RequestHandler = None
+        self.__wss = Websocket(api_version=api_version)
+        self.__http = RequestHandler(proxy=proxy, api_version=api_version)
         self.__loop: AbstractEventLoop = None
-        self.__proxy: str = proxy
         self.__setup_hook: Optional[Awaitable] = None
 
         self.user: User = None  # will be set after login
 
     async def __aenter__(self) -> None:
-        await self.__setup_hook()
+        await self.__setup_hook() if self.__setup_hook else None
 
     async def __aexit__(self, *args, **kwargs) -> None:
         await self.close()
@@ -48,12 +46,14 @@ class Client:
     def setup(self):
         def decorator(func):
             self.__setup_hook = func
+            return func
 
         return decorator
 
-    def event(self):
+    def event(self, event: str):
         def decorator(func):
-            pass  # set up listner
+            self.__wss.register_handler(event, func=func)
+            return func
 
         return decorator
 
@@ -80,9 +80,6 @@ class Client:
         return await self.__http.trigger_typing(channel_id)
 
     def run(self, token: str, *, reconnect: bool = True) -> None:
-        self.__wss = Websocket(api_version=self.api_version)
-        self.__http = RequestHandler(proxy=self.__proxy, api_version=self.api_version)
-
         async def runner():
             async with self:
                 self.user = await self.__http.login(token, locale=self.locale, user_agent=self.user_agent)

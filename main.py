@@ -1,6 +1,5 @@
 import os
 import discroid
-from discroid import Channel
 
 
 def main() -> None:
@@ -9,13 +8,13 @@ def main() -> None:
 
     client = discroid.Client(proxy=PROXY)
 
-    @client.setup_hook()
-    async def test():
-        channel = Channel(client, {"id": "989230366034366584"})
+    @client.event("READY")
+    async def on_ready(event):
+        print(f"Client ready! {event}")
 
-        async with channel.typing():
-            msg = await client.send_message(989230366034366584, "Hello world!")
-            print(msg)
+    @client.event("MESSAGE_CREATE")
+    async def on_message(event):
+        print(f"Message recieved! {event}")
 
     client.run(TOKEN)
 
