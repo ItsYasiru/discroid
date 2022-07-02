@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from logging import getLogger
-
 import asyncio
 import json
 import random
 import time
 import zlib
 from typing import TYPE_CHECKING, NamedTuple
-from discroid.casts import Message
+from discroid.casts import Cast, StateCast, Message
 
 import aiohttp
 
@@ -19,8 +17,6 @@ if TYPE_CHECKING:
     from aiohttp import ClientWebSocketResponse
 
     from .Client import Client
-
-logger = getLogger(__name__)
 
 
 class SocketClosure(Exception):
@@ -166,14 +162,14 @@ class Websocket:
         return _json
 
     async def send(self, payload: dict) -> None:
-        logger.debug(f"sending payload - {payload}")
+        print(f"wss -> {payload}")
         await self.__websocket.send_json(payload)
 
     async def receive(self) -> dict:
         payload = await self.__websocket.receive(self.heartbeat_interval)
         if payload.type is aiohttp.WSMsgType.BINARY:
             _json = self.decompress(payload.data)
-            logger.debug(f"received payload {_json}")
+            print(f"wss <- {_json}")
             return _json
         if payload.type is aiohttp.WSMsgType.ERROR:
             raise payload.data
@@ -229,8 +225,13 @@ class Websocket:
                     self.__heart.ack()
 
                 if data and event:
-                    cast = getattr(EVENTS, event, lambda data: data)
-                    data = cast(data)
+                    cast: Cast = getattr(EVENTS, event, None)
+                    if cast:
+                        if issubclass(cast, StateCast):
+                            args = (data, self.__client.get_state())
+                        else:
+                            args = (data,)
+                        data = cast(*args)
 
                     removed = list()
                     for index, entry in enumerate(self.__dispatch_listeners):
@@ -258,8 +259,12 @@ class Websocket:
 
                     handlers = self.__dispatch_handlers.get(event)
                     if handlers:
+                        tasks: list[Task] = list()
                         for handler in handlers:
-                            self.__loop.create_task(handler(data))
+                            tasks.append(self.__loop.create_task(handler(data)))
+
+                        while all(task.done() for task in tasks):
+                            pass
 
         except Exception as e:
             raise Exception(e)
