@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import ua_parser.user_agent_parser
 
@@ -16,6 +16,13 @@ if TYPE_CHECKING:
     from discroid.casts import Message
 
 
+class State(NamedTuple):
+    wss: Websocket
+    http: RequestHandler
+    loop: AbstractEventLoop
+    client: Client
+
+
 class Client:
     def __init__(self, *, proxy: str = None, locale: str = None, user_agent: str = None, api_version: int = 9, build_number: int = None):
 
@@ -27,8 +34,9 @@ class Client:
         self.super_properties = self.get_super_properties()
 
         self.__wss = Websocket(api_version=api_version)
-        self.__http = RequestHandler(proxy=proxy, api_version=api_version)
+        self.__http = RequestHandler(self, proxy=proxy, api_version=api_version)
         self.__loop: AbstractEventLoop = None
+        self.__state: State = State(self.__wss, self.__http, self.__loop, self)
         self.__setup_hook: Optional[Awaitable] = None
 
         self.user: ClientUser = None  # will be set after login
@@ -77,8 +85,8 @@ class Client:
         data = await self.__http.login(token.strip())
         self.user = ClientUser(data)
 
-    async def send_message(self, channel_id: int, content: str) -> Message:
-        return await self.__http.send_message(channel_id, content)
+    async def send_message(self, channel_id: int, content: str, *, reference: int = None) -> Message:
+        return await self.__http.send_message(channel_id, content, message_reference=reference)
 
     async def trigger_typing(self, channel_id: int) -> None:
         return await self.__http.trigger_typing(channel_id)
@@ -95,7 +103,7 @@ class Client:
         except KeyboardInterrupt:
             return
         except Exception as e:
-            raise e
+            raise Exception(e)
 
     def get_super_properties(self):
         parsed_ua = ua_parser.user_agent_parser.Parse(self.user_agent)
@@ -119,3 +127,6 @@ class Client:
             "client_event_source": None,
         }
         return sp
+
+    def get_state(self) -> State:
+        return self.__state
