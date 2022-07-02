@@ -1,3 +1,4 @@
+from .Cast import Cast, StateCast
 from .Channel import Channel
 from .Embed import Embed
 from .Messagable import Messagable
@@ -7,6 +8,8 @@ from .Role import Role
 from .User import ClientUser, User
 
 __all__ = (
+    Cast,
+    StateCast,
     Channel,
     Embed,
     Messagable,

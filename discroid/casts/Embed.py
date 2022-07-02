@@ -1,2 +1,5 @@
-class Embed:
+from .Cast import Cast
+
+
+class Embed(Cast):
     pass

@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
+from typing_extensions import Self
+
+from .Cast import StateCast
 from .Channel import ChannelMention
 from .Embed import Embed
 from .Reaction import Reaction
@@ -9,9 +14,11 @@ from .User import User
 if TYPE_CHECKING:
     from typing import Optional
 
+    from discroid.Client import State
 
-class Message:
-    def __init__(self, data: dict):
+
+class Message(StateCast):
+    def __init__(self, data: dict, state: State):
         self.id: int = int(data.get("id"))
         self.tts: bool = data.get("tts", False)
         self.type: int = data.get("type")
@@ -31,5 +38,10 @@ class Message:
         self.content: str = data.get("content")
         self.channel_id: int = int(data.get("channel_id"))
 
+        self._state = state
+
     def __str__(self) -> str:
         return self.content
+
+    async def reply(self, *args, **kwargs) -> Self:
+        return await self._state.client.send_message(self.channel_id, *args, **kwargs, reference=self.id)

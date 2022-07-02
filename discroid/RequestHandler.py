@@ -7,13 +7,15 @@ from typing import TYPE_CHECKING
 import aiohttp
 import ua_parser.user_agent_parser
 
-from discroid.casts import ClientUser, Message
+from discroid.casts import Cast, ClientUser, Message, StateCast
 from discroid.Utils import Utils
 
 if TYPE_CHECKING:
     from typing import Any, Union
 
     from aiohttp import ClientWebSocketResponse
+
+    from .Client import Client
 
 
 async def json_or_text(response: aiohttp.ClientResponse) -> Union[dict, str]:
@@ -30,6 +32,7 @@ async def json_or_text(response: aiohttp.ClientResponse) -> Union[dict, str]:
 class RequestHandler:
     def __init__(
         self,
+        client: Client,
         *,
         api_version: int,
         retries: int = 3,
@@ -38,8 +41,9 @@ class RequestHandler:
         self.retries: int = retries
 
         self.api_version: int = api_version
-        self.base_route: str = f"https://discord.com/api/v{api_version}/"
+        self.base_route: str = f"https://discord.com/api/v{api_version}"
 
+        self.__client: Client = client
         self.__proxy: str = proxy
         self.__headers: dict = None
         self.__session: aiohttp.ClientSession = aiohttp.ClientSession()
@@ -82,13 +86,13 @@ class RequestHandler:
         route: str,
         json: dict = None,
         *,
-        bind: Any = lambda x: x,
+        cast: Cast = None,
     ) -> Any:
 
         self.__headers["Referer"] = route
 
         kwargs = {
-            "json": json or None,
+            "json": json,
             "proxy": self.__proxy,
             "headers": self.__headers,
         }
@@ -99,7 +103,19 @@ class RequestHandler:
                     data = await json_or_text(response)
 
                     if 300 > response.status >= 200:
-                        return bind(data)
+
+                        if issubclass(cast, StateCast):
+                            args = (data, self.__client.get_state())
+                        else:
+                            args = (data,)
+                        return cast(*args)
+                    else:
+                        # write error handling code
+                        print("http error")
+                        print(response)
+                        print(f"json -> {json}")
+                        print(f"data -> {data}")
+                        break
 
             except OSError as e:
                 if tries < 4 and e.errno in (54, 10054):
@@ -118,7 +134,7 @@ class RequestHandler:
         user_agent: str = None,
     ) -> ClientUser:
         await self.set_headers(token=token, locale=locale, user_agent=user_agent)
-        return await self.request("GET", "/users/@me", bind=ClientUser)
+        return await self.request("GET", "/users/@me", cast=ClientUser)
 
     async def connect_to_websocket(
         self,
@@ -143,29 +159,29 @@ class RequestHandler:
         content: str,
         *,
         tts: bool = False,
-        nonce=None,
+        nonce: str = None,
         allowed_mentions=None,
-        message_reference=None,
+        message_reference: int = None,
         sticker_ids=None,
     ) -> Message:
         json = {
-            "tts": tts,
+            "nonce": nonce or Utils.calculate_nonce(),
             "content": content,
         }
-        if nonce == "calculate":
-            nonce = Utils.calculate_nonce()
-        else:
-            nonce = str(nonce)
-            json["nonce"] = nonce
-        if message_reference is not None:
-            json["message_reference"] = message_reference
-        if allowed_mentions is not None:
-            json["allowed_mentions"] = allowed_mentions
-        if sticker_ids is not None:
+
+        if tts:
+            json["tts"] = tts
+        if sticker_ids:
             json["sticker_ids"] = sticker_ids
+        if allowed_mentions:
+            json["allowed_mentions"] = allowed_mentions
+        if message_reference:
+            json["message_reference"] = {
+                "message_id": str(message_reference),
+            }
 
         route = f"/channels/{channel_id}/messages"
-        return await self.request("POST", route, json=json, bind=Message)
+        return await self.request("POST", route, json=json, cast=Message)
 
     async def trigger_typing(self, channel_id: int) -> None:
         await self.request("POST", f"/channels/{channel_id}/typing")

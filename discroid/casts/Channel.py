@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .Cast import Cast
 from .Messagable import Messagable
 
 if TYPE_CHECKING:
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from ..Client import Client
 
 
-class Channel(Messagable):
+class Channel(Cast, Messagable):
     def __init__(self, client: Client, data: dict):
         self.id: int = int(data.get("id"))
 
