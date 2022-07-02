@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING
 
-from .types import URL, Email, Phone
+from .Messagable import Messagable
+from discroid.types import URL, Email, Phone
 
 if TYPE_CHECKING:
     from typing import Optional
@@ -9,7 +10,7 @@ BANNER_URL = "https://cdn.discordapp.com/banners/{}/{}"
 AVATAR_URL = "https://cdn.discordapp.com/avatars/{}/{}"
 
 
-class User:
+class User(Messagable):
     def __init__(self, data: dict):
         self.id: int = int(data.get("id"))
         self.bot: bool = data.get("bot", False)
@@ -21,9 +22,7 @@ class User:
         self.flags: int = data.get("flags")
         self.public_flags: int = data.get("public_flags")
 
-        self.banner: Optional[URL] = (
-            URL(BANNER_URL.format(self.id, banner)) if (banner := data.get("banner")) else None
-        )
+        self.banner: Optional[URL] = URL(BANNER_URL.format(self.id, banner)) if (banner := data.get("banner")) else None
         self.banner_color: Optional[str] = data.get("banner_color")
         self.avatar: URL = URL(AVATAR_URL.format(self.id, data.get("avatar")))
         self.avatar_decoration: bool = data.get("avatar_decoration", False)

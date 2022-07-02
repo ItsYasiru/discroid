@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from logging import getLogger
+
 import asyncio
 import json
 import random
+import time
 import zlib
 from typing import TYPE_CHECKING, NamedTuple
+from discroid.casts import Message
 
 import aiohttp
 
@@ -15,6 +19,8 @@ if TYPE_CHECKING:
     from aiohttp import ClientWebSocketResponse
 
     from .Client import Client
+
+logger = getLogger(__name__)
 
 
 class SocketClosure(Exception):
@@ -48,11 +54,53 @@ class OPCODE:
     REQUEST_APPLICATION_COMMANDS = 24  # Send            request application/bot cmds (user, message, and slash cmds)
 
 
+class EVENTS:
+    MESSAGE_CREATE = Message
+
+
 class EventListener(NamedTuple):
     check: Callable[[dict[str, Any]], bool]
     event: str
     result: Optional[Callable[[dict[str, Any]], Any]]
     future: asyncio.Future[Any]
+
+
+class Heart:
+    def __init__(self, loop: AbstractEventLoop, wss: Websocket):
+        self.wss: Websocket = wss
+        self.loop: AbstractEventLoop = loop
+        self.worker: Task = None
+
+        self.last_heartbeat: float = None
+        self.last_heartbeat_ack: float = None
+        self.heartbeat_interval: int = None
+
+    @property
+    def latency(self):
+        if any(x is None for x in [self.last_heartbeat_ack, self.last_heartbeat]):
+            return float("inf")
+        return self.last_heartbeat_ack - self.last_heartbeat
+
+    def ack(self):
+        self.last_heartbeat_ack = time.perf_counter()
+
+    async def start(self):
+        payload = await self.wss.receive()
+
+        if payload.get("op") == OPCODE.HELLO:
+            data = payload.get("d", dict())
+            self.heartbeat_interval: int = data.get("heartbeat_interval")
+
+        async def worker():
+            while True:
+                await self.wss.send({"op": OPCODE.HEARTBEAT, "d": self.wss.last_sequence})
+                self.last_heartbeat = time.perf_counter()
+                await asyncio.sleep((self.heartbeat_interval * random.random()) / 1000)
+
+        self.worker = self.loop.create_task(worker())
+
+    def stop(self):
+        self.worker.cancel()
 
 
 class Websocket:
@@ -75,19 +123,27 @@ class Websocket:
             },
         }
 
+        self.is_closed: bool = True
         self.api_version = api_version
         self.last_sequence = None
         self.websocket_route: str = None
-        self.heartbeat_interval = 5
+
+        self.__heart: Heart = None
 
         self.__zlib = zlib.decompressobj()
-        self.__heart: Task = None
         self.__client: Client = None
         self.__loop: AbstractEventLoop = None
         self.__websocket: ClientWebSocketResponse = None
-        self.__dispatch: Callable = lambda *args: None
         self.__dispatch_handlers: dict[str, list[Awaitable]] = dict()
         self.__dispatch_listeners: list[EventListener] = list()
+
+    @property
+    def latency(self) -> float:
+        return self.__heart.latency * 1000
+
+    @property
+    def heartbeat_interval(self) -> float:
+        return self.__heart.heartbeat_interval
 
     @staticmethod
     def get_websocket(
@@ -110,42 +166,35 @@ class Websocket:
         return _json
 
     async def send(self, payload: dict) -> None:
+        logger.debug(f"sending payload - {payload}")
         await self.__websocket.send_json(payload)
 
     async def receive(self) -> dict:
         payload = await self.__websocket.receive(self.heartbeat_interval)
         if payload.type is aiohttp.WSMsgType.BINARY:
-            return self.decompress(payload.data)
+            _json = self.decompress(payload.data)
+            logger.debug(f"received payload {_json}")
+            return _json
         if payload.type is aiohttp.WSMsgType.ERROR:
             raise payload.data
         elif payload.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSE):
             raise SocketClosure
 
-    def register_listner(self, event: str, *, check: Callable[[dict[str, Any]], bool], result: Any = None, future: Future = None):
+    def register_listner(self, event: str, *, check: Callable[[dict[str, Any]], bool], result: Any = None, future: Future = None) -> Future:
         if not future:
             future = self.__loop.create_future()
         entry = EventListener(event=event, check=check, result=result, future=future)
         self.__dispatch_listeners.append(entry)
         return future
 
-    def register_handler(self, event: str, *, func: Awaitable) -> None:
+    def register_handler(self, event: str, *, func: Awaitable, cast_to: Any = None) -> None:
         handlers = self.__dispatch_handlers.get(event, list())
         handlers.append(func)
         self.__dispatch_handlers[event] = handlers
 
     async def hello(self):
-        payload = await self.receive()
-
-        if payload.get("op") == OPCODE.HELLO:
-            data = payload.get("d", dict())
-            self.heartbeat_interval: int = data.get("heartbeat_interval")
-
-        async def worker():
-            while True:
-                await self.send({"op": OPCODE.HEARTBEAT, "d": self.last_sequence})
-                await asyncio.sleep((self.heartbeat_interval * random.random()) / 1000)
-
-        self.__heart = self.__loop.create_task(worker())
+        self.__heart = Heart(self.__loop, self)
+        await self.__heart.start()
 
     async def identify(self, token: str):
         self.auth["token"] = token
@@ -164,46 +213,59 @@ class Websocket:
             self.__loop: AbstractEventLoop = client._Client__loop
             self.__websocket: ClientWebSocketResponse = await client._Client__http.connect_to_websocket(self.websocket_route)
 
+            self.is_closed = False
+
             await self.hello()
             await self.identify(token)
 
             while True:
                 payload = await self.receive()
 
+                op = payload.get("op")
                 data = payload.get("d")
                 event = payload.get("t")
 
-                removed = list()
-                for index, entry in enumerate(self.__dispatch_listeners):
-                    if entry.event != event:
-                        continue
+                if op == OPCODE.HEARTBEAT_ACK:
+                    self.__heart.ack()
 
-                    future = entry.future
-                    if future.cancelled():
-                        removed.append(index)
-                        continue
+                if data and event:
+                    cast = getattr(EVENTS, event, lambda data: data)
+                    data = cast(data)
 
-                    try:
-                        valid = entry.check(data)
-                    except Exception as exc:
-                        future.set_exception(exc)
-                        removed.append(index)
-                    else:
-                        if valid:
-                            ret = data if entry.result is None else entry.result(data)
-                            future.set_result(ret)
+                    removed = list()
+                    for index, entry in enumerate(self.__dispatch_listeners):
+                        if entry.event != event:
+                            continue
+
+                        future = entry.future
+                        if future.cancelled():
                             removed.append(index)
+                            continue
 
-                for index in reversed(removed):
-                    del self.__dispatch_listeners[index]
+                        try:
+                            valid = entry.check(data)
+                        except Exception as exc:
+                            future.set_exception(exc)
+                            removed.append(index)
+                        else:
+                            if valid:
+                                ret = data if entry.result is None else entry.result(data)
+                                future.set_result(ret)
+                                removed.append(index)
 
-                handlers = self.__dispatch_handlers.get(event)
-                if handlers:
-                    for handler in handlers:
-                        self.__loop.create_task(handler(data))
+                    for index in reversed(removed):
+                        del self.__dispatch_listeners[index]
+
+                    handlers = self.__dispatch_handlers.get(event)
+                    if handlers:
+                        for handler in handlers:
+                            self.__loop.create_task(handler(data))
 
         except Exception as e:
-            raise e
+            raise Exception(e)
 
     async def close(self) -> None:
-        self.__heart.cancel()
+        if self.is_closed:
+            return
+        self.__heart.stop()
+        self.is_closed = True

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .bases import Messagable
+from .Messagable import Messagable
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
 
-    from .Client import Client
+    from ..Client import Client
 
 
 class Channel(Messagable):

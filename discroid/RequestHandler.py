@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING
 import aiohttp
 import ua_parser.user_agent_parser
 
-from .Message import Message
-from .User import ClientUser
-from .Utils import Utils
+from discroid.casts import ClientUser, Message
+from discroid.Utils import Utils
 
 if TYPE_CHECKING:
     from typing import Any, Union
+
     from aiohttp import ClientWebSocketResponse
 
 
@@ -61,7 +61,7 @@ class RequestHandler:
             "Cache-Control": "no-cache",
             "Content-Type": "application/json",
             "Pragma": "no-cache",
-            "Referer": "https://discord.com/channels/@me",
+            "Referer": "https://discord.com/",
             "Sec-Ch-Ua": '" Not A;Brand";v="99", "Chromium";v="{0}", "Google Chrome";v="{0}"'.format(parsed_ua["user_agent"]["major"]),
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": '"{}"'.format(parsed_ua["os"]["family"]),
@@ -84,6 +84,9 @@ class RequestHandler:
         *,
         bind: Any = lambda x: x,
     ) -> Any:
+
+        self.__headers["Referer"] = route
+
         kwargs = {
             "json": json or None,
             "proxy": self.__proxy,

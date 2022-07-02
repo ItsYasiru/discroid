@@ -5,15 +5,15 @@ from typing import TYPE_CHECKING
 
 import ua_parser.user_agent_parser
 
-from .RequestHandler import RequestHandler
-from .User import User
-from .Websocket import Websocket
+from discroid.casts import ClientUser
+from discroid.RequestHandler import RequestHandler
+from discroid.Websocket import Websocket
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
     from typing import Any, Awaitable, Callable, Optional
 
-    from .Message import Message
+    from discroid.casts import Message
 
 
 class Client:
@@ -31,7 +31,11 @@ class Client:
         self.__loop: AbstractEventLoop = None
         self.__setup_hook: Optional[Awaitable] = None
 
-        self.user: User = None  # will be set after login
+        self.user: ClientUser = None  # will be set after login
+
+    @property
+    def latency(self):
+        return self.__wss.latency
 
     async def __aenter__(self) -> None:
         await self.__setup_hook() if self.__setup_hook else None
@@ -50,7 +54,7 @@ class Client:
 
         return decorator
 
-    def event(self, event: str):
+    def event(self, event: str, *, raw: bool = True):
         def decorator(func):
             self.__wss.register_handler(event, func=func)
             return func
@@ -71,7 +75,7 @@ class Client:
 
     async def login(self, token: str) -> None:
         data = await self.__http.login(token.strip())
-        self.user = User(data)
+        self.user = ClientUser(data)
 
     async def send_message(self, channel_id: int, content: str) -> Message:
         return await self.__http.send_message(channel_id, content)
