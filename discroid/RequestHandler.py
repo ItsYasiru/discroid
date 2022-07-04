@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 import aiohttp
 import ua_parser.user_agent_parser
 
-from discroid.casts import Cast, ClientUser, Message, StateCast
+from discroid.Abstracts import Cast, StateCast
+from discroid.casts import ClientUser, Message
 from discroid.Utils import Utils
 
 if TYPE_CHECKING:
@@ -88,7 +89,6 @@ class RequestHandler:
         *,
         cast: Cast = None,
     ) -> Any:
-
         self.__headers["Referer"] = route
 
         kwargs = {
@@ -101,6 +101,7 @@ class RequestHandler:
             try:
                 async with self.__session.request(method, self.base_route + route, **kwargs) as response:
                     data = await json_or_text(response)
+                    print(response)
 
                     if 300 > response.status >= 200:
 
@@ -124,6 +125,7 @@ class RequestHandler:
                 raise
 
     async def close(self):
+        print("Session closed")
         await self.__session.close()
 
     async def login(
@@ -165,12 +167,11 @@ class RequestHandler:
         sticker_ids=None,
     ) -> Message:
         json = {
+            "tts": tts or False,
             "nonce": nonce or Utils.calculate_nonce(),
             "content": content,
         }
 
-        if tts:
-            json["tts"] = tts
         if sticker_ids:
             json["sticker_ids"] = sticker_ids
         if allowed_mentions:

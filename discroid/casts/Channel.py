@@ -2,21 +2,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .Cast import Cast
-from .Messagable import Messagable
+from discroid.Abstracts import Messagable, StateCast
 
 if TYPE_CHECKING:
-    from asyncio import AbstractEventLoop
-
-    from ..Client import Client
+    from discroid.Client import State
 
 
-class Channel(Cast, Messagable):
-    def __init__(self, client: Client, data: dict):
+class Channel(StateCast, Messagable):
+    def __init__(self, data: dict, state: State):
         self.id: int = int(data.get("id"))
 
-        self._loop: AbstractEventLoop = client._Client__loop
-        self._client: Client = client
+        self._state = state
 
 
 class ChannelMention:

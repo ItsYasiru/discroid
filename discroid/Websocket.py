@@ -6,9 +6,11 @@ import random
 import time
 import zlib
 from typing import TYPE_CHECKING, NamedTuple
-from discroid.casts import Cast, StateCast, Message
 
 import aiohttp
+
+from discroid.Abstracts import Cast, StateCast
+from discroid.casts import Message
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop, Future, Task
@@ -73,9 +75,9 @@ class Heart:
 
     @property
     def latency(self):
-        if any(x is None for x in [self.last_heartbeat_ack, self.last_heartbeat]):
-            return float("inf")
-        return self.last_heartbeat_ack - self.last_heartbeat
+        if all((self.last_heartbeat_ack, self.last_heartbeat)):
+            return self.last_heartbeat_ack - self.last_heartbeat
+        return float("inf")
 
     def ack(self):
         self.last_heartbeat_ack = time.perf_counter()
@@ -91,7 +93,8 @@ class Heart:
             while True:
                 await self.wss.send({"op": OPCODE.HEARTBEAT, "d": self.wss.last_sequence})
                 self.last_heartbeat = time.perf_counter()
-                await asyncio.sleep((self.heartbeat_interval * random.random()) / 1000)
+                print((self.heartbeat_interval) / 1000)
+                await asyncio.sleep((self.heartbeat_interval) / 1000)
 
         self.worker = self.loop.create_task(worker())
 
@@ -135,7 +138,7 @@ class Websocket:
 
     @property
     def latency(self) -> float:
-        return self.__heart.latency * 1000
+        return self.__heart.latency
 
     @property
     def heartbeat_interval(self) -> float:
@@ -262,9 +265,6 @@ class Websocket:
                         tasks: list[Task] = list()
                         for handler in handlers:
                             tasks.append(self.__loop.create_task(handler(data)))
-
-                        while all(task.done() for task in tasks):
-                            pass
 
         except Exception as e:
             raise Exception(e)

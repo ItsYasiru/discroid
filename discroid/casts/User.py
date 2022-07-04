@@ -1,13 +1,11 @@
 from typing import TYPE_CHECKING
 
-from .Messagable import Messagable
+from discroid.Abstracts import Messagable
+from discroid.Constants import AVATAR_URL, BANNER_URL
 from discroid.types import URL, Email, Phone
 
 if TYPE_CHECKING:
     from typing import Optional
-
-BANNER_URL = "https://cdn.discordapp.com/banners/{}/{}"
-AVATAR_URL = "https://cdn.discordapp.com/avatars/{}/{}"
 
 
 class User(Messagable):

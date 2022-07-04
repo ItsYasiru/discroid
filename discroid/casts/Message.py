@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from discroid.Abstracts import StateCast
 from typing_extensions import Self
 
-from .Cast import StateCast
 from .Channel import ChannelMention
 from .Embed import Embed
 from .Reaction import Reaction
