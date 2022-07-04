@@ -14,5 +14,5 @@ class LoginFailure(HTTPError):
     pass
 
 
-class SocketClosure(WebsocketError):
+class WebsocketClosure(WebsocketError):
     pass

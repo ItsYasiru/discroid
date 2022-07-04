@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+from json import loads
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -12,28 +12,16 @@ from discroid.Casts import ClientUser, Message
 from discroid.Utils import Utils
 
 if TYPE_CHECKING:
-    from typing import Any, Union
+    from typing import Any
 
     from aiohttp import ClientWebSocketResponse
 
-    from .Client import Client
-
-
-async def json_or_text(response: aiohttp.ClientResponse) -> Union[dict, str]:
-    text = await response.text(encoding="utf-8")
-    try:
-        if response.headers["content-type"] == "application/json":
-            return json.loads(text)
-    except KeyError:
-        pass
-
-    return text
+    from .Client import Client, State
 
 
 class RequestHandler:
     def __init__(
         self,
-        client: Client,
         *,
         api_version: int,
         retries: int = 3,
@@ -44,7 +32,7 @@ class RequestHandler:
         self.api_version: int = api_version
         self.base_route: str = f"https://discord.com/api/v{api_version}"
 
-        self.__client: Client = client
+        self._state: State = None
         self.__proxy: str = proxy
         self.__headers: dict = None
         self.__session: aiohttp.ClientSession = aiohttp.ClientSession()
@@ -100,22 +88,24 @@ class RequestHandler:
         for tries in range(self.retries):
             try:
                 async with self.__session.request(method, self.base_route + route, **kwargs) as response:
-                    data = await json_or_text(response)
-                    print(response)
+                    text = await response.text(encoding="utf-8")
+                    data = None
+                    try:
+                        if response.headers["content-type"] == "application/json":
+                            data = loads(text)
+                    except KeyError:
+                        pass
 
                     if 300 > response.status >= 200:
+                        args = (data,)
+                        if cast:
+                            if issubclass(cast, StateCast):
+                                args = (data, self._state)
 
-                        if issubclass(cast, StateCast):
-                            args = (data, self.__client.get_state())
-                        else:
-                            args = (data,)
-                        return cast(*args)
+                            return cast(*args)
+                        return data
                     else:
                         # write error handling code
-                        print("http error")
-                        print(response)
-                        print(f"json -> {json}")
-                        print(f"data -> {data}")
                         break
 
             except OSError as e:
@@ -125,16 +115,18 @@ class RequestHandler:
                 raise
 
     async def close(self):
-        print("Session closed")
         await self.__session.close()
 
     async def login(
         self,
+        client: Client,
         token: str,
         *,
         locale: str = None,
         user_agent: str = None,
     ) -> ClientUser:
+        self._state = client.get_state()
+
         await self.set_headers(token=token, locale=locale, user_agent=user_agent)
         return await self.request("GET", "/users/@me", cast=ClientUser)
 
@@ -161,15 +153,15 @@ class RequestHandler:
         content: str,
         *,
         tts: bool = False,
-        nonce: str = None,
-        allowed_mentions=None,
+        allowed_mentions: list = None,
         message_reference: int = None,
-        sticker_ids=None,
+        sticker_ids: list[int] = None,
+        nonce: str = None,
     ) -> Message:
         json = {
             "tts": tts or False,
-            "nonce": nonce or Utils.calculate_nonce(),
             "content": content,
+            "nonce": nonce or Utils.calculate_nonce(),
         }
 
         if sticker_ids:
@@ -186,3 +178,72 @@ class RequestHandler:
 
     async def trigger_typing(self, channel_id: int) -> None:
         await self.request("POST", f"/channels/{channel_id}/typing")
+
+    async def interactions(
+        self,
+        interaction_type: int,
+        application_id: int,
+        *,
+        guild_id: int,
+        channel_id: int,
+        nonce: str = None,
+    ):
+        guild_id = str(guild_id)
+        channel_id = str(channel_id)
+        application_id = str(application_id)
+
+        json = {
+            "type": interaction_type,
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "session_id": self._state.wss.session_id,
+            "data": None,
+            "nonce": nonce or Utils.calculate_nonce(),
+        }
+
+        async def set_command_data(
+            *,
+            version: int,
+            command_id: int,
+            command_name: str,
+            command_type: int,
+            options: list[dict] = [],
+            attachments: list = [],
+            command_description: str = None,
+        ):
+            version = str(version)
+            command_id = str(command_id)
+
+            json["data"] = {
+                "version": version,
+                "id": command_id,
+                "name": command_name,
+                "type": command_type,
+                "options": options,
+                "attachments": attachments,
+            }
+
+            async def set_application_data(
+                *,
+                permission: bool = True,
+                member_permissions=None,
+                dm_permission: bool = True,
+            ):
+                json["data"]["application_command"] = {
+                    "id": command_id,
+                    "application_id": application_id,
+                    "version": version,
+                    "default_permission": permission,
+                    "default_memeber_permissions": member_permissions,
+                    "type": command_type,
+                    "name": command_name,
+                    "description": command_description,
+                    "dm_permission": dm_permission,
+                    "options": options,
+                }
+                return await self.request("POST", "/interactions", json)
+
+            return set_application_data
+
+        return set_command_data

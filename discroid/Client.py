@@ -26,7 +26,6 @@ class State(NamedTuple):
 
 class Client:
     def __init__(self, *, proxy: str = None, locale: str = None, user_agent: str = None, api_version: int = 9, build_number: int = None):
-
         self.locale: str = locale or "en-US"
         self.user_agent: str = (
             user_agent or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.51 Safari/537.36"
@@ -35,9 +34,9 @@ class Client:
         self.super_properties = self.get_super_properties()
 
         self.__wss = Websocket(api_version=api_version)
-        self.__http = RequestHandler(self, proxy=proxy, api_version=api_version)
+        self.__http = RequestHandler(proxy=proxy, api_version=api_version)
         self.__loop: AbstractEventLoop = None
-        self.__state: State = State(self.__wss, self.__http, self.__loop, self)
+        self.__state: State = None
         self.__setup_hook: Optional[Awaitable] = None
 
         self.user: ClientUser = None  # will be set after login
@@ -100,14 +99,18 @@ class Client:
     async def trigger_typing(self, channel_id: int) -> None:
         return await self.__http.trigger_typing(channel_id)
 
+    async def trigger_slash_command(self, *args, **kwargs):
+        return await self.__http.interactions(*args, **kwargs)
+
     def run(self, token: str, *, reconnect: bool = True) -> None:
         async def runner():
             async with self:
-                self.user = await self.__http.login(token, locale=self.locale, user_agent=self.user_agent)
-                self.__wss = await self.__wss.connect(self, token=token, reconnect=reconnect)
+                self.user = await self.__http.login(self, token, locale=self.locale, user_agent=self.user_agent)
+                self.__wss = await self.__wss.connect(self, token, reconnect=reconnect)
 
         try:
             self.__loop = asyncio.get_event_loop()
+            self.__state = State(self.__wss, self.__http, self.__loop, self)
             self.__loop.run_until_complete(runner())
         except KeyboardInterrupt:
             return

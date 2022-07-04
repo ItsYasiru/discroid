@@ -10,15 +10,15 @@ import aiohttp
 
 from discroid.Abstracts import Cast, StateCast
 from discroid.Casts import Message
-from discroid.Errors import SocketClosure
+from discroid.Errors import WebsocketError, WebsocketClosure
 
 if TYPE_CHECKING:
-    from asyncio import AbstractEventLoop, Future, Task
+    from asyncio import AbstractEventLoop, Future, Task, Event
     from typing import Any, Awaitable, Callable, Optional
 
     from aiohttp import ClientWebSocketResponse
 
-    from .Client import Client
+    from .Client import Client, State
 
 
 class OPCODE:
@@ -51,6 +51,7 @@ class OPCODE:
 class EVENTS:
     """Contains all the dispatched events and the data casts"""
 
+    READY = None
     MESSAGE_CREATE = Message
 
 
@@ -93,7 +94,6 @@ class Heart:
             while True:
                 await self.wss.send({"op": OPCODE.HEARTBEAT, "d": self.wss.last_sequence})
                 self.last_heartbeat = time.perf_counter()
-                print((self.heartbeat_interval) / 1000)
                 await asyncio.sleep((self.heartbeat_interval) / 1000)
 
         self.worker = self.loop.create_task(worker())
@@ -122,15 +122,16 @@ class Websocket:
             },
         }
 
+        self.ready: Event = None
         self.is_closed: bool = True
+        self.session_id: str = None
         self.api_version = api_version
         self.last_sequence = None
         self.websocket_route: str = None
 
+        self._state: State = None
         self.__heart: Heart = None
-
         self.__zlib = zlib.decompressobj()
-        self.__client: Client = None
         self.__loop: AbstractEventLoop = None
         self.__websocket: ClientWebSocketResponse = None
         self.__dispatch_handlers: dict[str, list[Awaitable]] = dict()
@@ -165,19 +166,17 @@ class Websocket:
         return _json
 
     async def send(self, payload: dict) -> None:
-        print(f"wss -> {payload}")
         await self.__websocket.send_json(payload)
 
     async def receive(self) -> dict:
         payload = await self.__websocket.receive(self.heartbeat_interval)
         if payload.type is aiohttp.WSMsgType.BINARY:
             _json = self.decompress(payload.data)
-            print(f"wss <- {_json}")
             return _json
         if payload.type is aiohttp.WSMsgType.ERROR:
-            raise payload.data
+            raise WebsocketError(payload.data)
         elif payload.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSE):
-            raise SocketClosure
+            raise WebsocketClosure
 
     def register_listner(self, event: str, *, check: Callable[[dict[str, Any]], bool], result: Any = None, future: Future = None) -> Future:
         if not future:
@@ -197,7 +196,7 @@ class Websocket:
 
     async def identify(self, token: str):
         self.auth["token"] = token
-        self.auth["properties"] = self.__client.get_super_properties()
+        self.auth["properties"] = self._state.client.get_super_properties()
         payload = {
             "op": OPCODE.IDENTIFY,
             "d": self.auth,
@@ -205,69 +204,76 @@ class Websocket:
 
         await self.send(payload)
 
+    async def setup(self, client: Client, *, websocket_route: str = None):
+        self.websocket_route = websocket_route or self.get_websocket("wss://gateway.discord.gg/", self.api_version)
+
+        self.is_closed = False
+
+        self._state = client.get_state()
+        self._client: Client = client
+        self.__loop: AbstractEventLoop = self._state.loop
+        self.__websocket: ClientWebSocketResponse = await self._state.http.connect_to_websocket(self.websocket_route)
+
+    async def socket_loop(self):
+        """A blocking call that runs the websocket"""
+        while True:
+            payload: dict = await self.receive()
+
+            op: int = payload.get("op")
+            data: dict = payload.get("d")
+            event: str = payload.get("t")
+
+            if op == OPCODE.HEARTBEAT_ACK:
+                self.__heart.ack()
+
+            if event == "READY":
+                self.session_id = data.get("session_id")
+
+            if data and event:
+                cast: Cast = getattr(EVENTS, event, None)
+                if cast:
+                    if issubclass(cast, StateCast):
+                        args = (data, self._state)
+                    else:
+                        args = (data,)
+                    data = cast(*args)
+
+                removed = list()
+                for index, entry in enumerate(self.__dispatch_listeners):
+                    if entry.event != event:
+                        continue
+
+                    future = entry.future
+                    if future.cancelled():
+                        removed.append(index)
+                        continue
+
+                    try:
+                        valid = entry.check(data)
+                    except Exception as exc:
+                        future.set_exception(exc)
+                        removed.append(index)
+                    else:
+                        if valid:
+                            ret = data if entry.result is None else entry.result(data)
+                            future.set_result(ret)
+                            removed.append(index)
+
+                for index in reversed(removed):
+                    del self.__dispatch_listeners[index]
+
+                if handlers := self.__dispatch_handlers.get(event):
+                    for handler in handlers:
+                        self.__loop.create_task(handler(data))
+
     async def connect(self, client: Client, token: str, *, reconnect: bool = True, websocket_route: str = None) -> None:
+        await self.setup(client, websocket_route=websocket_route)
+
         try:
-            self.websocket_route = websocket_route or self.get_websocket("wss://gateway.discord.gg/", self.api_version)
-            self.__client: Client = client
-            self.__loop: AbstractEventLoop = client._Client__loop
-            self.__websocket: ClientWebSocketResponse = await client._Client__http.connect_to_websocket(self.websocket_route)
-
-            self.is_closed = False
-
             await self.hello()
             await self.identify(token)
 
-            while True:
-                payload = await self.receive()
-
-                op = payload.get("op")
-                data = payload.get("d")
-                event = payload.get("t")
-
-                if op == OPCODE.HEARTBEAT_ACK:
-                    self.__heart.ack()
-
-                if data and event:
-                    cast: Cast = getattr(EVENTS, event, None)
-                    if cast:
-                        if issubclass(cast, StateCast):
-                            args = (data, self.__client.get_state())
-                        else:
-                            args = (data,)
-                        data = cast(*args)
-
-                    removed = list()
-                    for index, entry in enumerate(self.__dispatch_listeners):
-                        if entry.event != event:
-                            continue
-
-                        future = entry.future
-                        if future.cancelled():
-                            removed.append(index)
-                            continue
-
-                        try:
-                            valid = entry.check(data)
-                        except Exception as exc:
-                            future.set_exception(exc)
-                            removed.append(index)
-                        else:
-                            if valid:
-                                ret = data if entry.result is None else entry.result(data)
-                                future.set_result(ret)
-                                removed.append(index)
-
-                    for index in reversed(removed):
-                        del self.__dispatch_listeners[index]
-
-                    handlers = self.__dispatch_handlers.get(event)
-                    if handlers:
-                        tasks: list[Task] = list()
-                        for handler in handlers:
-                            tasks.append(self.__loop.create_task(handler(data)))
-                        for task in tasks:
-                            await task
-
+            await self.socket_loop()
         except Exception as e:
             raise Exception(e)
 
