@@ -1,15 +1,19 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from discroid.Abstracts import Messagable
 from discroid.Constants import AVATAR_URL, BANNER_URL
-from discroid.types import URL, Email, Phone
+from discroid.Types import URL, Email, Phone
 
 if TYPE_CHECKING:
     from typing import Optional
 
+    from discroid.Client import State
+
 
 class User(Messagable):
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, state: State):
         self.id: int = int(data.get("id"))
         self.bot: bool = data.get("bot", False)
         self.system: bool = data.get("system", False)
@@ -27,13 +31,17 @@ class User(Messagable):
 
         self.premium_type: int = data.get("premium_type")
 
+        self._state: State = state
+
 
 class ClientUser(User):
-    def __init__(self, data: dict):
-        super().__init__(data)
+    def __init__(self, data: dict, state: State):
+        super().__init__(data, state)
         self.locale: str = data.get("locale")
         self.verified: bool = data.get("verified", False)
 
         self.email: Optional[Email] = Email(_email) if (_email := data.get("email")) else None
         self.phone: Optional[Phone] = Phone(_phone) if (_phone := data.get("phone")) else None
         self.mfa_enabled: bool = data.get("mfa_enabled", False)
+
+        self._state: State = state

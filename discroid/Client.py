@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 import ua_parser.user_agent_parser
 
-from discroid.casts import ClientUser
+from discroid.Casts import ClientUser
 from discroid.RequestHandler import RequestHandler
 from discroid.Websocket import Websocket
 
@@ -13,7 +13,8 @@ if TYPE_CHECKING:
     from asyncio import AbstractEventLoop
     from typing import Any, Awaitable, Callable, Optional
 
-    from discroid.casts import Message
+    from discroid.Abstracts import Cast
+    from discroid.Casts import Message
 
 
 class State(NamedTuple):
@@ -62,8 +63,16 @@ class Client:
 
         return decorator
 
-    def event(self, event: str, *, raw: bool = True):
-        def decorator(func):
+    def on(self, *, raw: bool = False):
+        def decorator(func: Callable[[Cast]]) -> Callable:
+            event: str = func.__name__.upper()
+            self.__wss.register_handler(event, func=func)
+            return func
+
+        return decorator
+
+    def event(self, event: str, *, raw: bool = False) -> Callable:
+        def decorator(func: Callable[[Cast]]) -> Callable:
             self.__wss.register_handler(event, func=func)
             return func
 

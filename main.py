@@ -1,12 +1,10 @@
-import asyncio
 import os
 
 import discroid
-from discroid.casts import Message
+from discroid.Casts import Message
 
 
 def main() -> None:
-    # assert (PROXY := os.getenv("PROXY"))
     assert (TOKEN := os.getenv("TOKEN"))
 
     client = discroid.Client()
@@ -17,13 +15,17 @@ def main() -> None:
 
     @client.event("MESSAGE_CREATE")
     async def on_message(message: Message):
-        print("Message recieved!")
-        print(client.latency)
-        if message.author.id == client.user.id:
+        if message.author == client.user:
+            print(0)
             return
-        await client.trigger_typing(message.channel_id)
-        await asyncio.sleep(2)
-        await client.send_message(message.channel_id, message.content)
+        print("Message recieved!")
+        print(message)
+        c = await client.send_message(message.channel_id, message.content)
+        print(")", c, c.id)
+
+    @client.on()
+    async def message_create(message: Message):
+        print(message.content)
 
     client.run(TOKEN)
 

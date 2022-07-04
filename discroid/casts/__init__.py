@@ -1,4 +1,4 @@
-from .Channel import Channel
+from .TextChannel import TextChannel
 from .Embed import Embed
 from .Message import Message
 from .Reaction import Reaction
@@ -6,7 +6,7 @@ from .Role import Role
 from .User import ClientUser, User
 
 __all__ = (
-    Channel,
+    TextChannel,
     Embed,
     Message,
     Reaction,

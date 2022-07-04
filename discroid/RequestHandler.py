@@ -8,7 +8,7 @@ import aiohttp
 import ua_parser.user_agent_parser
 
 from discroid.Abstracts import Cast, StateCast
-from discroid.casts import ClientUser, Message
+from discroid.Casts import ClientUser, Message
 from discroid.Utils import Utils
 
 if TYPE_CHECKING:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 import time
 import zlib
 from typing import TYPE_CHECKING, NamedTuple
@@ -10,7 +9,8 @@ from typing import TYPE_CHECKING, NamedTuple
 import aiohttp
 
 from discroid.Abstracts import Cast, StateCast
-from discroid.casts import Message
+from discroid.Casts import Message
+from discroid.Errors import SocketClosure
 
 if TYPE_CHECKING:
     from asyncio import AbstractEventLoop, Future, Task
@@ -19,10 +19,6 @@ if TYPE_CHECKING:
     from aiohttp import ClientWebSocketResponse
 
     from .Client import Client
-
-
-class SocketClosure(Exception):
-    pass
 
 
 class OPCODE:
@@ -53,6 +49,8 @@ class OPCODE:
 
 
 class EVENTS:
+    """Contains all the dispatched events and the data casts"""
+
     MESSAGE_CREATE = Message
 
 
@@ -64,6 +62,8 @@ class EventListener(NamedTuple):
 
 
 class Heart:
+    """Handles heartbeating"""
+
     def __init__(self, loop: AbstractEventLoop, wss: Websocket):
         self.wss: Websocket = wss
         self.loop: AbstractEventLoop = loop
@@ -265,6 +265,8 @@ class Websocket:
                         tasks: list[Task] = list()
                         for handler in handlers:
                             tasks.append(self.__loop.create_task(handler(data)))
+                        for task in tasks:
+                            await task
 
         except Exception as e:
             raise Exception(e)

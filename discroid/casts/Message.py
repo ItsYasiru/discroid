@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from discroid.Abstracts import StateCast
 from typing_extensions import Self
 
-from .Channel import ChannelMention
+from .TextChannel import TextChannel, ChannelMention
 from .Embed import Embed
 from .Reaction import Reaction
 from .Role import Role
@@ -25,7 +25,7 @@ class Message(StateCast):
         self.timestamp: str = data.get("timestamp")
         self.edited_timestamp: Optional[str] = _edited_timestamp if (_edited_timestamp := data.get("edited_timestamp")) else None
 
-        self.author: User = User(data.get("author"))
+        self.author: User = User(data.get("author"), state)
         self.mentions: list[User] = [User(_user) for _user in data.get("mentions", list())]
         self.mention_roles: list[Role] = [Role(_role) for _role in data.get("mention_roles", list())]
         self.mention_channels: list[ChannelMention] = [ChannelMention(_mention) for _mention in data.get("mention_channels", list())]
@@ -38,10 +38,15 @@ class Message(StateCast):
         self.content: str = data.get("content")
         self.channel_id: int = int(data.get("channel_id"))
 
-        self._state = state
+        self._state: State = state
+        self.__raw_data: dict = data
 
     def __str__(self) -> str:
         return self.content
+
+    @property
+    def channel(self):
+        return TextChannel.from_message(self.__raw_data)
 
     async def reply(self, *args, **kwargs) -> Self:
         return await self._state.client.send_message(self.channel_id, *args, **kwargs, reference=self.id)

@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from typing import Generator
 
     from discroid.Client import State
-    from discroid.casts import Message
+    from discroid.Casts import Message
 
 
 class Cast:
@@ -17,25 +17,24 @@ class Cast:
     pass
 
 
-class StateCast:
+class StateCast(Cast):
+    """Represensents a Cast that needs the client state"""
+
     pass
 
 
-class Messagable:
-    if TYPE_CHECKING:
-
-        id: int
-
-        _state: State
+class Messagable(StateCast):
+    id: int
+    _state: StateCast
 
     def __eq__(self, __o: object) -> bool:
         return self.id == __o.id if isinstance(__o, Messagable) else False
 
-    async def send(self, *args, **kwargs) -> Message:
-        return await self._state.client.send_message(*args, **kwargs)
-
     def typing(self):
         return Typing(self, self._state)
+
+    async def send(self, *args, **kwargs) -> Message:
+        return await self._state.client.send_message(*args, **kwargs)
 
 
 class Typing:
