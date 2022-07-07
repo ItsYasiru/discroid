@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from json import loads
+from logging import getLogger
 from typing import TYPE_CHECKING
 
 import aiohttp
@@ -18,14 +19,17 @@ if TYPE_CHECKING:
 
     from .Client import Client, State
 
+logger = getLogger(__name__)
+
 
 class RequestHandler:
     def __init__(
         self,
         *,
-        api_version: int,
-        retries: int = 3,
         proxy: str = None,
+        retries: int = 3,
+        cookies: Any = None,
+        api_version: int = 9,
     ):
         self.retries: int = retries
 
@@ -35,6 +39,7 @@ class RequestHandler:
         self._state: State = None
         self.__proxy: str = proxy
         self.__headers: dict = None
+        self.__cookies: Any = cookies
         self.__session: aiohttp.ClientSession = aiohttp.ClientSession()
 
     async def set_headers(
@@ -54,7 +59,7 @@ class RequestHandler:
             "Cache-Control": "no-cache",
             "Content-Type": "application/json",
             "Pragma": "no-cache",
-            "Referer": "https://discord.com/",
+            "Referer": None,  # is set before every request
             "Sec-Ch-Ua": '" Not A;Brand";v="99", "Chromium";v="{0}", "Google Chrome";v="{0}"'.format(parsed_ua["user_agent"]["major"]),
             "Sec-Ch-Ua-Mobile": "?0",
             "Sec-Ch-Ua-Platform": '"{}"'.format(parsed_ua["os"]["family"]),
@@ -72,31 +77,38 @@ class RequestHandler:
     async def request(
         self,
         method: str,
+        /,
         route: str,
         json: dict = None,
         *,
         cast: Cast = None,
+        custom_route: str = None,
     ) -> Any:
+        route = self.base_route + route if not custom_route else custom_route
         self.__headers["Referer"] = route
 
         kwargs = {
             "json": json,
             "proxy": self.__proxy,
             "headers": self.__headers,
+            "cookies": self.__cookies,
         }
 
         for tries in range(self.retries):
             try:
-                async with self.__session.request(method, self.base_route + route, **kwargs) as response:
+                async with self.__session.request(method, route, **kwargs) as response:
                     text = await response.text(encoding="utf-8")
-                    data = None
+                    data = text
                     try:
                         if response.headers["content-type"] == "application/json":
                             data = loads(text)
                     except KeyError:
                         pass
 
+                    log_message = f"{response.status} {route} : {json} -> {data}"
+
                     if 300 > response.status >= 200:
+                        logger.debug(log_message)
                         args = (data,)
                         if cast:
                             if issubclass(cast, StateCast):
@@ -105,7 +117,7 @@ class RequestHandler:
                             return cast(*args)
                         return data
                     else:
-                        # write error handling code
+                        logger.error(log_message)
                         break
 
             except OSError as e:
@@ -147,21 +159,40 @@ class RequestHandler:
 
         return await self.__session.ws_connect(route, **kwargs)
 
+    async def location_metadata(self):
+        raise NotImplementedError
+
+    async def survey(self):
+        raise NotImplementedError
+
+    async def maintenance_schedule(self):
+        #  uses api v2
+        raise NotImplementedError
+
+    async def user_affinity_guilds(self):
+        #  initial load of guilds I assume
+        raise NotImplementedError
+
+    async def user_library(self):
+        #  discord's game library data
+        raise NotImplementedError
+
     async def send_message(
         self,
         channel_id: int,
+        /,
         content: str,
         *,
         tts: bool = False,
-        allowed_mentions: list = None,
-        message_reference: int = None,
         sticker_ids: list[int] = None,
+        allowed_mentions: list = None,
+        message_reference: dict = None,
         nonce: str = None,
     ) -> Message:
         json = {
-            "tts": tts or False,
             "content": content,
             "nonce": nonce or Utils.calculate_nonce(),
+            "tts": tts or False,
         }
 
         if sticker_ids:
@@ -169,9 +200,7 @@ class RequestHandler:
         if allowed_mentions:
             json["allowed_mentions"] = allowed_mentions
         if message_reference:
-            json["message_reference"] = {
-                "message_id": str(message_reference),
-            }
+            json["message_reference"] = message_reference
 
         route = f"/channels/{channel_id}/messages"
         return await self.request("POST", route, json=json, cast=Message)
@@ -182,15 +211,29 @@ class RequestHandler:
     async def interactions(
         self,
         interaction_type: int,
+        /,
         application_id: int,
         *,
         guild_id: int,
         channel_id: int,
+        options: list[dict] = [],
+        attachments: list = [],
+        command_id: int = None,
+        command_name: str = None,
+        command_type: int = None,
+        command_version: int = None,
+        command_description: str = None,
+        permission: bool = True,
+        dm_permission: bool = True,
+        member_permissions: list = None,
         nonce: str = None,
     ):
         guild_id = str(guild_id)
         channel_id = str(channel_id)
         application_id = str(application_id)
+
+        command_id = str(command_id)
+        command_version = str(command_version or int(command_id) + 1)
 
         json = {
             "type": interaction_type,
@@ -198,42 +241,17 @@ class RequestHandler:
             "guild_id": guild_id,
             "channel_id": channel_id,
             "session_id": self._state.wss.session_id,
-            "data": None,
-            "nonce": nonce or Utils.calculate_nonce(),
-        }
-
-        async def set_command_data(
-            *,
-            version: int,
-            command_id: int,
-            command_name: str,
-            command_type: int,
-            options: list[dict] = [],
-            attachments: list = [],
-            command_description: str = None,
-        ):
-            version = str(version)
-            command_id = str(command_id)
-
-            json["data"] = {
-                "version": version,
+            "data": {
+                "version": command_version,
                 "id": command_id,
                 "name": command_name,
                 "type": command_type,
                 "options": options,
                 "attachments": attachments,
-            }
-
-            async def set_application_data(
-                *,
-                permission: bool = True,
-                member_permissions=None,
-                dm_permission: bool = True,
-            ):
-                json["data"]["application_command"] = {
+                "application_command": {
                     "id": command_id,
                     "application_id": application_id,
-                    "version": version,
+                    "version": command_version,
                     "default_permission": permission,
                     "default_memeber_permissions": member_permissions,
                     "type": command_type,
@@ -241,9 +259,9 @@ class RequestHandler:
                     "description": command_description,
                     "dm_permission": dm_permission,
                     "options": options,
-                }
-                return await self.request("POST", "/interactions", json)
+                },
+            },
+            "nonce": nonce or Utils.calculate_nonce(),
+        }
 
-            return set_application_data
-
-        return set_command_data
+        return await self.request("POST", "/interactions", json)

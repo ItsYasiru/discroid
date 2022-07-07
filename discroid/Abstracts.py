@@ -7,8 +7,8 @@ if TYPE_CHECKING:
     from asyncio import Task
     from typing import Generator
 
-    from discroid.Client import State
     from discroid.Casts import Message
+    from discroid.Client import State
 
 
 class Cast:
@@ -20,12 +20,11 @@ class Cast:
 class StateCast(Cast):
     """Represensents a Cast that needs the client state"""
 
-    pass
+    _state: State
 
 
 class Messagable(StateCast):
     id: int
-    _state: StateCast
 
     def __eq__(self, __o: object) -> bool:
         return self.id == __o.id if isinstance(__o, Messagable) else False

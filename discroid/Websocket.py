@@ -4,21 +4,25 @@ import asyncio
 import json
 import time
 import zlib
+from logging import getLogger
 from typing import TYPE_CHECKING, NamedTuple
 
 import aiohttp
 
 from discroid.Abstracts import Cast, StateCast
 from discroid.Casts import Message
-from discroid.Errors import WebsocketError, WebsocketClosure
+from discroid.Errors import WebsocketClosure, WebsocketError
 
 if TYPE_CHECKING:
-    from asyncio import AbstractEventLoop, Future, Task, Event
+    from asyncio import AbstractEventLoop, Event, Future, Task
     from typing import Any, Awaitable, Callable, Optional
 
     from aiohttp import ClientWebSocketResponse
 
     from .Client import Client, State
+
+
+logger = getLogger(__name__)
 
 
 class OPCODE:
@@ -166,17 +170,22 @@ class Websocket:
         return _json
 
     async def send(self, payload: dict) -> None:
+        logger.debug(f"sending {payload}")
         await self.__websocket.send_json(payload)
 
     async def receive(self) -> dict:
         payload = await self.__websocket.receive(self.heartbeat_interval)
+
         if payload.type is aiohttp.WSMsgType.BINARY:
             _json = self.decompress(payload.data)
+            logger.debug(f"received {_json}")
             return _json
-        if payload.type is aiohttp.WSMsgType.ERROR:
+        elif payload.type is aiohttp.WSMsgType.ERROR:
             raise WebsocketError(payload.data)
         elif payload.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING, aiohttp.WSMsgType.CLOSE):
             raise WebsocketClosure
+        else:
+            logger.warn(f"unhandled websocket payload type {payload.type}")
 
     def register_listner(self, event: str, *, check: Callable[[dict[str, Any]], bool], result: Any = None, future: Future = None) -> Future:
         if not future:

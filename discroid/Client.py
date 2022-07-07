@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from typing import Any, Awaitable, Callable, Optional
 
     from discroid.Abstracts import Cast
-    from discroid.Casts import Message
+    from discroid.Casts import Message, MessageReference
 
 
 class State(NamedTuple):
@@ -90,17 +90,16 @@ class Client:
         return asyncio.wait_for(future, timeout)
 
     async def login(self, token: str) -> None:
-        data = await self.__http.login(token.strip())
-        self.user = ClientUser(data)
+        self.user = await self.__http.login(token)
 
-    async def send_message(self, channel_id: int, content: str, *, reference: int = None) -> Message:
-        return await self.__http.send_message(channel_id, content, message_reference=reference)
+    async def send_message(self, channel_id: int, content: str, *, reference: MessageReference = None) -> Message:
+        return await self.__http.send_message(channel_id, content, message_reference=reference.to_dict())
 
     async def trigger_typing(self, channel_id: int) -> None:
         return await self.__http.trigger_typing(channel_id)
 
     async def trigger_slash_command(self, *args, **kwargs):
-        return await self.__http.interactions(*args, **kwargs)
+        return await self.__http.interactions(2, *args, **kwargs)
 
     def run(self, token: str, *, reconnect: bool = True) -> None:
         async def runner():
