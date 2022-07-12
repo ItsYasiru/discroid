@@ -2,17 +2,25 @@ import logging
 import logging.config
 import os
 
-import discroid
-from discroid.Casts import Message
-
 logging.config.fileConfig("./.conf/logging_test.conf")
 logger = logging.getLogger(__name__)
+
+import discroid  # noqa E402
+from discroid.Casts import Message  # noqa E402
 
 
 def main() -> None:
     assert (TOKEN := os.getenv("TOKEN"))
 
     client = discroid.Client()
+
+    async def test_command(message: Message):
+        await message.reply("commmand invoked!")
+
+    prefix = "!"
+    commands = {
+        "test": test_command,
+    }
 
     @client.event("READY")
     async def on_ready(event):
@@ -28,9 +36,10 @@ def main() -> None:
 
     @client.event("MESSAGE_CREATE")
     async def on_message(message: Message):
-        if message.author == client.user:
-            return
-        await message.reply("recv")
+        if message.content.startswith(prefix):
+            command = commands.get(message.content[1:])
+            if command:
+                await command(message)
 
     @client.on()
     async def message_update(message):

@@ -56,6 +56,7 @@ class EVENTS:
     """Contains all the dispatched events and the data casts"""
 
     READY = None
+    RESUMED = None
     MESSAGE_CREATE = Message
 
 
@@ -103,7 +104,8 @@ class Heart:
         self.worker = self.loop.create_task(worker())
 
     def stop(self):
-        self.worker.cancel()
+        if self.worker:
+            self.worker.cancel()
 
 
 class Websocket:
@@ -111,22 +113,7 @@ class Websocket:
         self,
         api_version: int,
     ) -> None:
-        self.auth = {
-            "token": None,
-            "capabilities": 509,
-            "properties": None,
-            "presence": {"status": "online", "since": 0, "activities": [], "afk": False},
-            "compress": False,
-            "client_state": {
-                "guild_hashes": dict(),
-                "highest_last_message_id": "0",
-                "read_state_version": 0,
-                "user_guild_settings_version": -1,
-                "user_settings_version": -1,
-            },
-        }
-
-        self.ready: Event = None
+        self.is_ready: Event = None
         self.is_closed: bool = True
         self.session_id: str = None
         self.api_version = api_version
@@ -135,7 +122,7 @@ class Websocket:
 
         self._state: State = None
         self.__heart: Heart = None
-        self.__zlib = zlib.decompressobj()
+        self.__zlib = None
         self.__loop: AbstractEventLoop = None
         self.__websocket: ClientWebSocketResponse = None
         self.__dispatch_handlers: dict[str, list[Awaitable]] = dict()
@@ -164,10 +151,17 @@ class Websocket:
 
         return value.format(base_url, encoding, api_version)
 
+    @classmethod
+    def prepare_payload(cls, op: int, /, data: dict) -> dict:
+        return {"op": op, "d": data}
+
     def decompress(self, payload) -> dict:
-        payload = self.__zlib.decompress(payload)
-        _json = json.loads(payload.decode("UTF8"))
-        return _json
+        try:
+            payload = self.__zlib.decompress(payload)
+        except zlib.error:
+            logger.error(f"error decompressing {payload}")
+
+        return json.loads(payload.decode("UTF8"))
 
     async def send(self, payload: dict) -> None:
         logger.debug(f"sending {payload}")
@@ -199,27 +193,56 @@ class Websocket:
         handlers.append(func)
         self.__dispatch_handlers[event] = handlers
 
-    async def hello(self):
+    async def hello(self) -> None:
         self.__heart = Heart(self.__loop, self)
         await self.__heart.start()
 
-    async def identify(self, token: str):
-        self.auth["token"] = token
-        self.auth["properties"] = self._state.client.get_super_properties()
-        payload = {
-            "op": OPCODE.IDENTIFY,
-            "d": self.auth,
-        }
+    async def ready(self, data: dict) -> None:
+        self.is_ready.set()
+        self.session_id = data.get("session_id")
+
+    async def identify(self, token: str) -> None:
+        payload = self.prepare_payload(
+            OPCODE.IDENTIFY,
+            {
+                "token": token,
+                "capabilities": 509,
+                "properties": self._state.client.get_super_properties(),
+                "presence": {"status": "online", "since": 0, "activities": list(), "afk": False},
+                "compress": False,
+                "client_state": {
+                    "guild_hashes": dict(),
+                    "highest_last_message_id": "0",
+                    "read_state_version": 0,
+                    "user_guild_settings_version": -1,
+                    "user_settings_version": -1,
+                },
+            },
+        )
 
         await self.send(payload)
 
+    async def resume(self, token: str, session_id: str):
+        payload = self.prepare_payload(
+            OPCODE.RESUME,
+            {
+                "token": token,
+                "session_id": session_id,
+                "seq": 1337,
+            },
+        )
+        await self.send(payload)
+
     async def setup(self, client: Client, *, websocket_route: str = None):
+        self._state = client.get_state()
+
         self.websocket_route = websocket_route or self.get_websocket("wss://gateway.discord.gg/", self.api_version)
 
+        self.is_ready = asyncio.Event()
         self.is_closed = False
 
-        self._state = client.get_state()
         self._client: Client = client
+        self.__zlib = zlib.decompressobj()
         self.__loop: AbstractEventLoop = self._state.loop
         self.__websocket: ClientWebSocketResponse = await self._state.http.connect_to_websocket(self.websocket_route)
 
@@ -236,7 +259,7 @@ class Websocket:
                 self.__heart.ack()
 
             if event == "READY":
-                self.session_id = data.get("session_id")
+                await self.ready(data)
 
             if data and event:
                 cast: Cast = getattr(EVENTS, event, None)
@@ -275,19 +298,42 @@ class Websocket:
                     for handler in handlers:
                         self.__loop.create_task(handler(data))
 
-    async def connect(self, client: Client, token: str, *, reconnect: bool = True, websocket_route: str = None) -> None:
-        await self.setup(client, websocket_route=websocket_route)
-
-        try:
+    async def connect(
+        self,
+        client: Client,
+        token: str,
+        *,
+        reconnect: bool = True,
+        reconnect_interval: int = 10,
+        websocket_route: str = None,
+        resume: str = None,
+    ) -> None:
+        async def post_setup():
+            await self.setup(client, websocket_route=websocket_route)
             await self.hello()
             await self.identify(token)
 
+            if resume or self.session_id:
+                await self.resume(token, session_id=resume or self.session_id)
+
+        if reconnect:
+            while True:
+                try:
+                    await post_setup()
+                    await self.socket_loop()
+                except WebsocketClosure:
+                    self.is_ready.clear()
+                    self.is_closed = True
+
+                logger.error("connection closed attempting reconnect")
+                await asyncio.sleep(reconnect_interval)
+        else:
+            await post_setup()
             await self.socket_loop()
-        except Exception as e:
-            raise Exception(e)
 
     async def close(self) -> None:
         if self.is_closed:
             return
-        self.__heart.stop()
+        if self.__heart:
+            self.__heart.stop()
         self.is_closed = True

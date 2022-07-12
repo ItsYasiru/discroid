@@ -111,8 +111,6 @@ class Client:
             self.__loop = asyncio.get_event_loop()
             self.__state = State(self.__wss, self.__http, self.__loop, self)
             self.__loop.run_until_complete(runner())
-        except KeyboardInterrupt:
-            return
         except Exception as e:
             raise Exception(e)
 
@@ -121,7 +119,7 @@ class Client:
         browser_versions = [parsed_ua["user_agent"]["major"], parsed_ua["user_agent"]["minor"], parsed_ua["user_agent"]["patch"]]
         os_versions = [parsed_ua["os"]["major"], parsed_ua["os"]["minor"], parsed_ua["os"]["patch"]]
 
-        sp = {
+        super_properties = {
             "os": parsed_ua["os"]["family"],
             "browser": parsed_ua["user_agent"]["family"],
             "device": "",
@@ -137,7 +135,7 @@ class Client:
             "client_build_number": self.build_number,
             "client_event_source": None,
         }
-        return sp
+        return super_properties
 
     def get_state(self) -> State:
         return self.__state

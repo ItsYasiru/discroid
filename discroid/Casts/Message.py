@@ -55,6 +55,7 @@ class Message(StateCast):
         self.content: str = data.get("content")
 
         self.guild_id: Optional[int] = int(x) if (x := data.get("guild_id")) else None
+        self.webhook_id: Optional[int] = int(x) if (x := data.get("webhoook_id")) else None
         self.channel_id: int = int(data.get("channel_id"))
 
         self._state: State = state
