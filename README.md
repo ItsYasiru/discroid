@@ -1,6 +1,6 @@
 # Discroid
 
-An async API wrapper for discords' API, currently in development. Inspired and functional abstraction taken from [discord.py](https://github.com/Rapptz/discord.py) and [Discum](https://github.com/Merubokkusu/Discord-S.C.U.M)
+An async API wrapper for discords' API, currently in development. Inspiration and structuring ideas taken from [discord.py](https://github.com/Rapptz/discord.py) and [Discum](https://github.com/Merubokkusu/Discord-S.C.U.M).
 
 ## TODO
 
