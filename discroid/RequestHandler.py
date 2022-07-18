@@ -11,6 +11,7 @@ import ua_parser.user_agent_parser
 from discroid.Abstracts import Cast, StateCast
 from discroid.Casts import ClientUser, Message
 from discroid.Utils import Utils
+from discroid.Errors import IllegalArgumentError
 
 if TYPE_CHECKING:
     from typing import Any
@@ -82,9 +83,9 @@ class RequestHandler:
         json: dict = None,
         *,
         cast: Cast = None,
-        custom_route: str = None,
+        base_route: str = None,
     ) -> Any:
-        route = self.base_route + route if not custom_route else custom_route
+        route = f"{base_route or self.base_route}{route}"
         self.__headers["Referer"] = route
 
         kwargs = {
@@ -105,7 +106,7 @@ class RequestHandler:
                     except KeyError:
                         pass
 
-                    log_message = f"{response.status} {route} : {json} -> {data}"
+                    log_message = f"{method} {response.status} {route} : {json} -> {data}"
 
                     if 300 > response.status >= 200:
                         logger.debug(log_message)
@@ -265,3 +266,33 @@ class RequestHandler:
         }
 
         return await self.request("POST", "/interactions", json)
+
+    async def react(
+        self,
+        channel_id: int,
+        *,
+        message_id: int,
+        emoji_id: int = None,
+        emoji_name: str = None,
+        user_id: int = None,
+        remove: bool = False,
+        remove_all: bool = False,
+    ) -> None:
+        if not remove and user_id:
+            raise IllegalArgumentError("cannot remove reactions sent by others")
+        if emoji_id and not emoji_name:
+            raise IllegalArgumentError("'emoji_name' must be passed as an argument for custom emojis")
+
+        route = f"/channels/{channel_id}/messages/{message_id}/reactions"
+
+        if not remove_all:
+            if not emoji_name:
+                raise IllegalArgumentError("'emoji_name' must be passed as an argument")
+
+            route += f"/{emoji_name}" + (":" + emoji_id if emoji_id else "")
+            route += f"/{user_id or '/@me'}?location=Message"
+
+        return await self.request("DELETE" if remove or remove_all else "PUT", route)
+
+    async def delete_reaction(self, *args, **kwargs):
+        return await self.react(*args, **kwargs, remove=True)

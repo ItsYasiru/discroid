@@ -1,3 +1,7 @@
+class IllegalArgumentError(ValueError):
+    pass
+
+
 class DiscroidError(Exception):
     pass
 

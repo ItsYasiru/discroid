@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 from discroid.Abstracts import StateCast
+from discroid.Errors import IllegalArgumentError
 from typing_extensions import Self
 
 from .Embed import Embed
-from .Reaction import Reaction
+from .Reaction import Emoji, Reaction
 from .Role import Role
 from .TextChannel import ChannelMention, TextChannel
 from .User import User
@@ -49,7 +50,7 @@ class Message(StateCast):
         self.mention_everyone: bool = data.get("mention_everyone", False)
 
         self.embeds: list[Embed] = [Embed(_embed) for _embed in data.get("embeds", list())]
-        self.reactions: list[Reaction] = [Reaction(_reaction) for _reaction in data.get("reactions", list())]
+        self.reactions: list[Reaction] = [Reaction(_reaction, state) for _reaction in data.get("reactions", list())]
         self.attachemnts: Optional[list] = data.get("attachments")
 
         self.content: str = data.get("content")
@@ -70,3 +71,65 @@ class Message(StateCast):
 
     async def reply(self, *args, **kwargs) -> Self:
         return await self._state.client.send_message(self.channel_id, *args, **kwargs, reference=MessageReference.from_message(self))
+
+    async def react(
+        self,
+        reaction: Reaction = None,
+        *,
+        emoji: Emoji = None,
+        emoji_id: int = None,
+        emoji_name: str = None,
+    ):
+        if emoji is None and (emoji_id is None and emoji_name is None):
+            raise IllegalArgumentError("provide either the arguments 'emoji' or 'emoji_id' and 'emoji_name")
+
+        if not emoji and reaction:
+            emoji = reaction.emoji
+
+            if not emoji_id:
+                emoji_id = emoji.id
+            if not emoji_name:
+                emoji_name = emoji.name
+
+        return await self._state.http.react(
+            self.channel_id,
+            message_id=self.id,
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+        )
+
+    async def delete_reaction(
+        self,
+        reaction: Reaction = None,
+        *,
+        user: User = None,
+        user_id: int = None,
+        emoji: Emoji = None,
+        emoji_id: int = None,
+        emoji_name: str = None,
+    ) -> None:
+        if reaction is None and emoji is None and not emoji_name:
+            raise IllegalArgumentError("provide atleast one of the arguments 'reaction', 'emoji', or 'emoji_name'")
+
+        if not emoji and reaction:
+            emoji = reaction.emoji
+
+            if not emoji_id:
+                emoji_id = emoji.id
+            if not emoji_name:
+                emoji_name = emoji.name
+
+        if user:
+            user_id = user.id
+
+        await self._state.http.react(
+            self.channel_id,
+            message_id=self.id,
+            emoji_id=emoji_id,
+            emoji_name=emoji_name,
+            user_id=user_id,
+            remove=True,
+        )
+
+    async def delete_all_reactions(self) -> None:
+        await self._state.http.react(self.channel_id, message_id=self.id, remove_all=True)

@@ -12,19 +12,24 @@ from discroid.Casts import Message  # noqa E402
 def main() -> None:
     assert (TOKEN := os.getenv("TOKEN"))
 
-    client = discroid.Client()
+    client = discroid.Client(proxy="http://100.104.158.59:8080")
 
     async def test_command(message: Message):
         await message.reply("commmand invoked!")
 
-    prefix = "!"
-    commands = {
-        "test": test_command,
-    }
+    async def test_reactions(message: Message):
+        EMOJI = r"%F0%9F%91%8D"
+        await message.react(emoji_name=EMOJI)
 
-    @client.event("READY")
-    async def on_ready(event):
-        logger.debug("Client ready!")
+        check = lambda d: int(d["message_id"]) == message.id and int(d["user_id"]) == message.author.id
+
+        data = await client.wait_for("MESSAGE_REACTION_ADD", check=check)
+        await message.delete_reaction(user_id=data["user_id"], emoji_name=EMOJI)
+
+        data = await client.wait_for("MESSAGE_REACTION_ADD", check=check)
+        await message.delete_all_reactions()
+
+    async def test_slash_commands(message: Message):
         await client.trigger_slash_command(
             235148962103951360,
             guild_id=989193589319946290,
@@ -33,6 +38,17 @@ def main() -> None:
             command_type=1,
             command_name="ping",
         )
+
+    prefix = "!"
+    commands = {
+        "test": test_command,
+        "react": test_reactions,
+        "slash": test_slash_commands,
+    }
+
+    @client.event("READY")
+    async def on_ready(event):
+        logger.debug("Client ready!")
 
     @client.event("MESSAGE_CREATE")
     async def on_message(message: Message):

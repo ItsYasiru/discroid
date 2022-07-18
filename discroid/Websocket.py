@@ -331,6 +331,8 @@ class Websocket:
             await post_setup()
             await self.socket_loop()
 
+        await self.close()
+
     async def close(self) -> None:
         if self.is_closed:
             return
